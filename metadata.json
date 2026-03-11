@@ -1,0 +1,5 @@
+{
+  "name": "Dashboard Audit 5R",
+  "description": "An application to read PowerPoint or PDF files, extract audit finding tables, summarize them with AI, and download as Excel.",
+  "requestFramePermissions": []
+}
