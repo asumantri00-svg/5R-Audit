@@ -307,18 +307,73 @@ Top PICs: ${JSON.stringify(chartData.picDistribution)}
     },
   });
 
-  const jsonStr = response.text?.trim() || "{}";
-  try {
-    const parsed = JSON.parse(jsonStr);
-    return {
-      summary: parsed.summary || "No summary generated.",
-      suggestions: parsed.suggestions || "No insights generated.",
-      chartData
-    };
-  } catch (e) {
-    console.error("Failed to parse JSON", e);
-    return { summary: "Failed to generate summary.", suggestions: "Failed to generate insights.", chartData };
+  let jsonStr = response.text?.trim() || "{}";
+  
+  if (jsonStr.startsWith("```json")) {
+    jsonStr = jsonStr.replace(/^```json/, "").replace(/```$/, "").trim();
+  } else if (jsonStr.startsWith("```")) {
+    jsonStr = jsonStr.replace(/^```/, "").replace(/```$/, "").trim();
   }
+
+  let inString = false;
+  let escape = false;
+  let sanitizedJson = "";
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+    if (escape) {
+      escape = false;
+      sanitizedJson += char;
+      continue;
+    }
+    if (char === '\\') {
+      escape = true;
+      sanitizedJson += char;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      sanitizedJson += char;
+      continue;
+    }
+    if (inString && (char === '\n' || char === '\r')) {
+      sanitizedJson += char === '\n' ? '\\n' : '\\r';
+      continue;
+    }
+    if (inString && char === '\t') {
+      sanitizedJson += '\\t';
+      continue;
+    }
+    sanitizedJson += char;
+  }
+
+  // If the string was truncated, close the quote
+  if (inString) {
+    sanitizedJson += '"';
+  }
+
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(sanitizedJson);
+  } catch (e: any) {
+    // Attempt to salvage truncated JSON by closing the object
+    try {
+      parsed = JSON.parse(sanitizedJson + "}");
+    } catch (e2) {
+      try {
+        parsed = JSON.parse(sanitizedJson + '"}');
+      } catch (e3) {
+        console.error("Failed to parse JSON", e);
+        console.error("Raw JSON string:", sanitizedJson);
+        return { summary: "Failed to generate summary.", suggestions: "Failed to generate insights.", chartData };
+      }
+    }
+  }
+
+  return {
+    summary: parsed?.summary || "No summary generated.",
+    suggestions: parsed?.suggestions || "No insights generated.",
+    chartData
+  };
 }
 
 function fileToBase64(file: File): Promise<string> {
