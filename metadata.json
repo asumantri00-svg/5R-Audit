@@ -1,5 +1,5 @@
 {
-  "name": "Dashboard Audit 5R",
-  "description": "An application to read PowerPoint or PDF files, extract audit finding tables, summarize them with AI, and download as Excel.",
+  "name": "Gemini Chat",
+  "description": "A Vite + React web application that integrates the Gemini API to allow users to ask questions and receive AI responses.",
   "requestFramePermissions": []
 }
