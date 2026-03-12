@@ -18,15 +18,7 @@ export function Dashboard({ data }: DashboardProps) {
       categoryDistribution: [{ name: 'Kosong', value: 1 }],
       areaDistribution: [{ name: 'Kosong', value: 1 }],
       picDistribution: [{ name: 'Kosong', value: 1 }],
-      statusDistribution: [{ name: 'Kosong', value: 1 }],
     }
-  };
-
-  const STATUS_COLORS: Record<string, string> = {
-    'Open': '#ef4444',
-    'On Progres': '#f59e0b',
-    'Close': '#10b981',
-    'Kosong': '#e2e8f0'
   };
 
   return (
@@ -41,31 +33,7 @@ export function Dashboard({ data }: DashboardProps) {
           <h3 className="text-lg font-semibold text-slate-800">Data Distribution</h3>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {/* Status Chart */}
-          <div className="h-64">
-            <h4 className="text-sm font-medium text-slate-500 text-center mb-4">By Status</h4>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={displayData.chartData.statusDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {displayData.chartData.statusDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={STATUS_COLORS[entry.name] || COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Category Chart */}
           <div className="h-64">
             <h4 className="text-sm font-medium text-slate-500 text-center mb-4">By Category</h4>
@@ -96,8 +64,8 @@ export function Dashboard({ data }: DashboardProps) {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={displayData.chartData.areaDistribution}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
                 <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                 <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -110,8 +78,8 @@ export function Dashboard({ data }: DashboardProps) {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={displayData.chartData.picDistribution} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} width={60} />
+                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} width={80} />
                 <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                 <Bar dataKey="value" fill="#14b8a6" radius={[0, 4, 4, 0]} />
               </BarChart>

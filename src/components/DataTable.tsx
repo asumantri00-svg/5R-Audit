@@ -46,7 +46,6 @@ export function DataTable({ findings }: DataTableProps) {
               <th className="px-6 py-3 font-medium">Root Cause</th>
               <th className="px-6 py-3 font-medium">Action</th>
               <th className="px-6 py-3 font-medium">Due Date</th>
-              <th className="px-6 py-3 font-medium">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -64,15 +63,6 @@ export function DataTable({ findings }: DataTableProps) {
                 <td className="px-6 py-4 text-slate-700 min-w-[200px]">{finding.rootCause}</td>
                 <td className="px-6 py-4 text-slate-700 min-w-[200px]">{finding.action}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-slate-700">{finding.dueDate}</td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                    finding.status === 'Open' ? 'bg-red-100 text-red-700' :
-                    finding.status === 'On Progres' ? 'bg-amber-100 text-amber-700' :
-                    'bg-emerald-100 text-emerald-700'
-                  }`}>
-                    {finding.status}
-                  </span>
-                </td>
               </tr>
             ))}
           </tbody>
