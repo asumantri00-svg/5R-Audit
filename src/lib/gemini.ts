@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import JSZip from "jszip";
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
 
 export interface Finding {
   no: string;
@@ -12,6 +12,7 @@ export interface Finding {
   rootCause: string;
   action: string;
   dueDate: string;
+  status: string;
 }
 
 export interface DashboardData {
@@ -21,6 +22,7 @@ export interface DashboardData {
     categoryDistribution: { name: string; value: number }[];
     areaDistribution: { name: string; value: number }[];
     picDistribution: { name: string; value: number }[];
+    statusDistribution: { name: string; value: number }[];
   };
 }
 
@@ -74,8 +76,9 @@ function extractJSONObjects(text: string): any[] {
         depth--;
         if (depth === 0) {
           currentObj += "}";
+          let cleanObj = "";
           try {
-            let cleanObj = currentObj.replace(/[\x00-\x1F\x7F-\x9F]/g, " ");
+            cleanObj = currentObj.replace(/[\x00-\x1F\x7F-\x9F]/g, " ");
             results.push(JSON.parse(cleanObj));
           } catch (err) {
             console.warn("Failed to parse extracted object:", cleanObj);
@@ -136,37 +139,60 @@ async function extractContentFromPPTX(file: File) {
   const zip = new JSZip();
   const loadedZip = await zip.loadAsync(file);
   
-  let text = '';
-  const images: { data: string, mimeType: string }[] = [];
+  const slides: { text: string, images: { data: string, mimeType: string }[] }[] = [];
 
   // Extract text from slides
-  const slideFiles = Object.keys(loadedZip.files).filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'));
+  const slideFiles = Object.keys(loadedZip.files)
+    .filter(name => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'))
+    .sort((a, b) => {
+      const numA = parseInt(a.match(/\d+/)?.[0] || '0');
+      const numB = parseInt(b.match(/\d+/)?.[0] || '0');
+      return numA - numB;
+    });
+
   for (const slideFile of slideFiles) {
+    let slideText = '';
+    const slideImages: { data: string, mimeType: string }[] = [];
+    
     const content = await loadedZip.files[slideFile].async('text');
-    // Simple regex to extract text from XML nodes like <a:t>Some text</a:t>
     const matches = content.match(/<a:t.*?>(.*?)<\/a:t>/g);
     if (matches) {
-      const slideText = matches.map(m => m.replace(/<a:t.*?>/, '').replace(/<\/a:t>/, '')).join(' ');
-      text += slideText + '\n';
+      slideText = matches.map(m => m.replace(/<a:t.*?>/, '').replace(/<\/a:t>/, '')).join(' ');
     }
-  }
 
-  // Extract images
-  const mediaFiles = Object.keys(loadedZip.files).filter(name => name.startsWith('ppt/media/'));
-  for (const mediaFile of mediaFiles) {
-    const extension = mediaFile.split('.').pop()?.toLowerCase();
-    let mimeType = '';
-    if (extension === 'png') mimeType = 'image/png';
-    else if (extension === 'jpeg' || extension === 'jpg') mimeType = 'image/jpeg';
-    else if (extension === 'gif') mimeType = 'image/gif';
+    // Find images for this slide
+    const slideNum = slideFile.match(/\d+/)?.[0];
+    const relFile = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
     
-    if (mimeType) {
-      const base64Data = await loadedZip.files[mediaFile].async('base64');
-      images.push({ data: base64Data, mimeType });
+    if (loadedZip.files[relFile]) {
+      const relContent = await loadedZip.files[relFile].async('text');
+      const targetMatches = relContent.match(/Target="..\/media\/(.*?)"/g);
+      
+      if (targetMatches) {
+        for (const targetMatch of targetMatches) {
+          const mediaName = targetMatch.match(/media\/(.*?)"/)?.[1];
+          const mediaPath = `ppt/media/${mediaName}`;
+          
+          if (loadedZip.files[mediaPath]) {
+            const extension = mediaName?.split('.').pop()?.toLowerCase();
+            let mimeType = '';
+            if (extension === 'png') mimeType = 'image/png';
+            else if (extension === 'jpeg' || extension === 'jpg') mimeType = 'image/jpeg';
+            else if (extension === 'gif') mimeType = 'image/gif';
+            
+            if (mimeType) {
+              const base64Data = await loadedZip.files[mediaPath].async('base64');
+              slideImages.push({ data: base64Data, mimeType });
+            }
+          }
+        }
+      }
     }
+
+    slides.push({ text: slideText, images: slideImages });
   }
 
-  return { text, images };
+  return slides;
 }
 
 export async function extractFindingsFromFiles(files: File[]): Promise<Finding[]> {
@@ -176,9 +202,8 @@ export async function extractFindingsFromFiles(files: File[]): Promise<Finding[]
     const mimeType = file.type;
 
     try {
-      const parts: any[] = [];
-
       if (mimeType === 'application/pdf' || file.name.endsWith('.pdf')) {
+        const parts: any[] = [];
         const base64Data = await fileToBase64(file);
         parts.push({
           inlineData: {
@@ -187,64 +212,95 @@ export async function extractFindingsFromFiles(files: File[]): Promise<Finding[]
           },
         });
         parts.push({
-          text: "Extract the audit finding table data from this document. The table has headers: No., Problem, Category, Area, PIC, Root Cause, Action, Due Date. Return the data as a JSON array of objects. Ignore rows where the Problem column is empty. If there are no findings, return an empty array.",
+          text: "Extract the audit finding table data from this document. The table has headers: No., Problem, Category, Area, PIC, Root Cause, Action, Due Date. Return the data as a JSON array of objects. Ignore rows where the Problem column is empty. If there are no findings, return an empty array. For PDF, set status to 'Open' by default.",
         });
-      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || file.name.endsWith('.pptx')) {
-        const { text, images } = await extractContentFromPPTX(file);
-        
-        for (const img of images) {
-          parts.push({
-            inlineData: {
-              data: img.data,
-              mimeType: img.mimeType
-            }
-          });
-        }
-        
-        parts.push({
-          text: `Here is the text extracted from the presentation:\n${text}\n\nExtract the audit finding table data from this document and its images. The table has headers: No., Problem, Category, Area, PIC, Root Cause, Action, Due Date. Return the data as a JSON array of objects. Ignore rows where the Problem column is empty. If there are no findings, return an empty array.`
-        });
-      } else {
-        throw new Error(`Unsupported file type: ${mimeType || file.name}. Please upload PDF or PPTX files.`);
-      }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: { parts },
-        config: {
-          maxOutputTokens: 8192,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                no: { type: Type.STRING },
-                problem: { type: Type.STRING },
-                category: { type: Type.STRING },
-                area: { type: Type.STRING },
-                pic: { type: Type.STRING },
-                rootCause: { type: Type.STRING },
-                action: { type: Type.STRING },
-                dueDate: { type: Type.STRING },
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: { parts },
+          config: {
+            maxOutputTokens: 8192,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  no: { type: Type.STRING },
+                  problem: { type: Type.STRING },
+                  category: { type: Type.STRING },
+                  area: { type: Type.STRING },
+                  pic: { type: Type.STRING },
+                  rootCause: { type: Type.STRING },
+                  action: { type: Type.STRING },
+                  dueDate: { type: Type.STRING },
+                  status: { type: Type.STRING },
+                },
               },
             },
           },
-        },
-      });
+        });
 
-      const jsonStr = response.text?.trim() || "[]";
-      
-      try {
+        const jsonStr = response.text?.trim() || "[]";
         const parsed = extractJSONObjects(jsonStr);
-        if (parsed.length === 0 && jsonStr.length > 20) {
-          console.error("Raw AI Output:", jsonStr);
-          throw new Error("Could not extract any valid data from the AI response.");
+        allFindings.push(...parsed.map(f => ({ ...f, status: f.status || 'Open' })));
+
+      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || file.name.endsWith('.pptx')) {
+        const slides = await extractContentFromPPTX(file);
+        
+        for (const slide of slides) {
+          if (!slide.text.trim() && slide.images.length === 0) continue;
+
+          const imageCount = slide.images.length;
+          let determinedStatus = 'Open';
+          if (imageCount === 2) determinedStatus = 'On Progres';
+          else if (imageCount >= 3) determinedStatus = 'Close';
+
+          const parts: any[] = [];
+          for (const img of slide.images) {
+            parts.push({
+              inlineData: {
+                data: img.data,
+                mimeType: img.mimeType
+              }
+            });
+          }
+          
+          parts.push({
+            text: `Here is the text extracted from this slide:\n${slide.text}\n\nExtract the audit finding data from this slide. The fields are: No., Problem, Category, Area, PIC, Root Cause, Action, Due Date. Return the data as a JSON array of objects. If there are no findings on this slide, return an empty array []. Use status: "${determinedStatus}" for any findings found on this slide.`
+          });
+
+          const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: { parts },
+            config: {
+              maxOutputTokens: 2048,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    no: { type: Type.STRING },
+                    problem: { type: Type.STRING },
+                    category: { type: Type.STRING },
+                    area: { type: Type.STRING },
+                    pic: { type: Type.STRING },
+                    rootCause: { type: Type.STRING },
+                    action: { type: Type.STRING },
+                    dueDate: { type: Type.STRING },
+                  },
+                },
+              },
+            },
+          });
+
+          const jsonStr = response.text?.trim() || "[]";
+          const parsed = extractJSONObjects(jsonStr);
+          allFindings.push(...parsed.map(f => ({ ...f, status: determinedStatus })));
         }
-        allFindings.push(...parsed);
-      } catch (e: any) {
-        console.error("Failed to parse JSON for file", file.name, e);
-        throw new Error(`Failed to process "${file.name}": The document contains complex formatting that caused the AI to generate invalid data.`);
+      } else {
+        throw new Error(`Unsupported file type: ${mimeType || file.name}. Please upload PDF or PPTX files.`);
       }
     } catch (e: any) {
       console.error("Failed to extract findings from file", file.name, e);
@@ -252,7 +308,6 @@ export async function extractFindingsFromFiles(files: File[]): Promise<Finding[]
     }
   }
 
-  // Filter out findings where the problem is empty or just whitespace
   return allFindings.filter(f => f.problem && f.problem.trim() !== '');
 }
 
@@ -261,20 +316,24 @@ export async function generateDashboardData(findings: Finding[]): Promise<Dashbo
   const categoryCount: Record<string, number> = {};
   const areaCount: Record<string, number> = {};
   const picCount: Record<string, number> = {};
+  const statusCount: Record<string, number> = {};
 
   findings.forEach(f => {
     const cat = f.category || 'Unknown';
     const area = f.area || 'Unknown';
     const pic = f.pic || 'Unknown';
+    const status = f.status || 'Open';
     categoryCount[cat] = (categoryCount[cat] || 0) + 1;
     areaCount[area] = (areaCount[area] || 0) + 1;
     picCount[pic] = (picCount[pic] || 0) + 1;
+    statusCount[status] = (statusCount[status] || 0) + 1;
   });
 
   const chartData = {
     categoryDistribution: Object.entries(categoryCount).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 10),
     areaDistribution: Object.entries(areaCount).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 10),
     picDistribution: Object.entries(picCount).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 10),
+    statusDistribution: Object.entries(statusCount).map(([name, value]) => ({ name, value })),
   };
 
   // 2. Ask LLM ONLY for simple summary and suggestions based on aggregated data
@@ -289,6 +348,7 @@ Total Findings: ${findings.length}
 Top Categories: ${JSON.stringify(chartData.categoryDistribution)}
 Top Areas: ${JSON.stringify(chartData.areaDistribution)}
 Top PICs: ${JSON.stringify(chartData.picDistribution)}
+Status Distribution: ${JSON.stringify(chartData.statusDistribution)}
 `,
         },
       ],
